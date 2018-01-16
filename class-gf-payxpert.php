@@ -29,6 +29,7 @@ class GFPayxpert extends GFPaymentAddOn {
         parent::init();
 
         add_filter( 'gform_submit_button', array( $this, 'form_submit_button' ), 10, 2 );
+        include_once ('includes/Connect2PayClient.php');
     }
 
     public function init_admin() {
@@ -233,7 +234,13 @@ class GFPayxpert extends GFPaymentAddOn {
 
     function redirect_url( $feed, $submission_data, $form, $entry ) {
 
-        $c2pClient = $this->include_payxpert_api();
+        $connect2pay = $this->get_plugin_setting( 'apiurl' );
+
+        $originator_id = $this->get_plugin_setting( 'originator' );
+
+        $password = $this->get_plugin_setting( 'password' );
+
+        $c2pClient = new Connect2PayClient($connect2pay, $originator_id, $password);
 
         $c2pClient->setPaymentType(Connect2PayClient::_PAYMENT_TYPE_CREDITCARD);
         $c2pClient->setPaymentMode(Connect2PayClient::_PAYMENT_MODE_SINGLE);
@@ -266,7 +273,7 @@ class GFPayxpert extends GFPaymentAddOn {
         $c2pClient->setSecure3d(isset($secure) ? $secure : false);
 
         if ($c2pClient->validate()) {
-          if ($c2pClient->preparePayment()) {
+          if ($c2pClient->prepareTransaction()) {
         
             $_SESSION['merchantToken'] = $c2pClient->getMerchantToken();
         
@@ -342,7 +349,13 @@ class GFPayxpert extends GFPaymentAddOn {
             return;
         }
 
-        $c2pClient = $this->include_payxpert_api();
+        $connect2pay = $this->get_plugin_setting( 'apiurl' );
+
+        $originator_id = $this->get_plugin_setting( 'originator' );
+
+        $password = $this->get_plugin_setting( 'password' );
+
+        $c2pClient = new Connect2PayClient($connect2pay, $originator_id, $password);
 
         if ($c2pClient->handleCallbackStatus()) {
     
@@ -425,7 +438,8 @@ class GFPayxpert extends GFPaymentAddOn {
                         'name'     => 'apiurl',
                         'label'    => esc_html__( 'API URL', 'gravityformspayxpert' ),
                         'type'     => 'text',
-                        'class'    => 'medium'
+                        'class'    => 'medium',
+                        'default_value' => 'https://connect2.payxpert.com/'
                     ),
                     array(
                         'name'          => '3dsecure',
@@ -452,27 +466,6 @@ class GFPayxpert extends GFPaymentAddOn {
  
     public function is_valid_setting( $value ) {
         return strlen( $value ) < 10;
-    }
-
-    public function include_payxpert_api() {
-
-        // If PayXpert class does not exist, load PayXpert API library.
-        if ( ! class_exists( '\Connect2PayClient' ) ) {
-            require_once( $this->get_base_path() . '/includes/payxpert/Connect2PayClient.php' );
-        }
-
-        // $connect2pay = "https://connect2.payxpert.com/";
-
-        $connect2pay = "http://connect2pay.dev.payxpert.com:9001/";
-
-        $merchant = $this->get_plugin_setting( 'originator' );
-
-        $password = $this->get_plugin_setting( 'password' );
-
-        $c2pClient = new Connect2PayClient($connect2pay, $merchant, $password);
-
-        
-        return $c2pClient;
     }
 
     public function customer_query_string( $feed, $lead ) {
