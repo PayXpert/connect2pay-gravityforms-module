@@ -3,7 +3,7 @@
  * Plugin Name: Gravity Forms PayXpert Add-On
  * Plugin URI: http://www.gravityforms.com
  * Description: Integrates Gravity Forms with PayXpert, enabling end users to purchase goods and services through Gravity Forms.
- * Version: 1.0.0
+ * Version: 1.0.2
  * Author: Payxpert
  * Author URI: http://www.payxpert.com
  * Text Domain: gravityformspayxpert
