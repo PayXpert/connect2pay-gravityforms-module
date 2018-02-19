@@ -5,6 +5,7 @@ The author of this plugin can NEVER be held responsible for this software.
 There is no warrenty what so ever. You accept this by using this software.
 
 ## Changelog
+* 1.1.0 - Return customer to website with proper message (payment completed or failed)
 * 1.0.2 - Relocated Connect2Pay library
 * 1.0.1 - Removed hardcoded API url
 * 1.0.0 - Initial Release

@@ -240,6 +240,10 @@ class GFPayxpert extends GFPaymentAddOn {
 
         $password = $this->get_plugin_setting( 'password' );
 
+        if (!class_exists('Connect2PayClient')) {
+          require_once ('includes/Connect2PayClient.php');
+        }
+
         $c2pClient = new Connect2PayClient($connect2pay, $originator_id, $password);
 
         $c2pClient->setPaymentType(Connect2PayClient::_PAYMENT_TYPE_CREDITCARD);
@@ -254,7 +258,6 @@ class GFPayxpert extends GFPaymentAddOn {
         $callback_url = add_query_arg( 'page', 'gf_payxpert_form_ipn', home_url( '/' ) );
         $return_url = $this->return_url( $form['id'], $entry['id'] );
         $secure = $this->get_plugin_setting( '3dsecure' );
-
         $c2pClient->setOrderID($entry["id"]);
         $c2pClient->setShopperID($customer_fields["email"]);
         $c2pClient->setAmount($amount);
@@ -268,13 +271,13 @@ class GFPayxpert extends GFPaymentAddOn {
         $c2pClient->setShopperCountryCode($customer_fields["country"]);
         $c2pClient->setShopperPhone($customer_fields["phone"]);
         $c2pClient->setShopperEmail($customer_fields["email"]);
-        $c2pClient->setCtrlRedirectURL($return_url);
+        $c2pClient->setCtrlRedirectURL($return_url); //http://localhost/wordp/index.php/2018/01/22/hello-world/?gf_payxpert_form_return=aWRzPTF8NTUmaGFzaD0zYjdiZGUxYTljOWI4N2I1MTMyNzM5NmQzMGMwN2YzOA=
         $c2pClient->setCtrlCallbackURL($callback_url); // http://shops/wordpress/4.8.1/?page=gf_payxpert_form_ipn
         $c2pClient->setSecure3d(isset($secure) ? $secure : false);
 
         if ($c2pClient->validate()) {
-          if ($c2pClient->prepareTransaction()) {
-        
+          if ($c2pClient->preparePayment()) {
+            session_start();
             $_SESSION['merchantToken'] = $c2pClient->getMerchantToken();
         
             $url = $c2pClient->getCustomerRedirectURL();
@@ -311,6 +314,8 @@ class GFPayxpert extends GFPaymentAddOn {
     }
 
     public static function maybe_thankyou_page() {
+        session_start();
+
         $instance = self::get_instance();
 
         if ( ! $instance->is_gravityforms_supported() ) {
@@ -322,23 +327,73 @@ class GFPayxpert extends GFPaymentAddOn {
 
             parse_str( $str, $query );
             if ( wp_hash( 'ids=' . $query['ids'] ) == $query['hash'] ) {
-                list( $form_id, $lead_id ) = explode( '|', $query['ids'] );
+                $connect2pay = $instance->get_plugin_setting( 'apiurl' );
 
-                $form = GFAPI::get_form( $form_id );
-                $lead = GFAPI::get_entry( $lead_id );
+                $originator_id = $instance->get_plugin_setting( 'originator' );
 
-                if ( ! class_exists( 'GFFormDisplay' ) ) {
-                    require_once( GFCommon::get_base_path() . '/form_display.php' );
-                }
+                $password = $instance->get_plugin_setting( 'password' );
 
-                $confirmation = GFFormDisplay::handle_confirmation( $form, $lead, false );
+                $c2pClient = new Connect2PayClient($connect2pay, $originator_id, $password);
 
-                if ( is_array( $confirmation ) && isset( $confirmation['redirect'] ) ) {
-                    header( "Location: {$confirmation['redirect']}" );
-                    exit;
-                }
+                $data = $_POST["data"];
 
-                GFFormDisplay::$submission[ $form_id ] = array( 'is_confirmation' => true, 'confirmation_message' => $confirmation, 'form' => $form, 'lead' => $lead );
+                $merchantToken = $_SESSION['merchantToken'];
+
+                if ($c2pClient->handleRedirectStatus($data, $merchantToken)) {
+            
+                    $status = $c2pClient->getStatus();
+
+                    // get the Error code
+                    $errorCode = $status->getErrorCode();
+                    $entry_id = $status->getOrderID();
+
+                    $array = explode('|', $c2pClient->getCtrlCustomData());
+                    $baseCurrencyAmount = $array[0];
+
+                    // errorCode = 000 transaction is successfull
+                    list( $form_id, $lead_id ) = explode( '|', $query['ids'] );
+
+                    $form = GFAPI::get_form( $form_id );
+                    $lead = GFAPI::get_entry( $lead_id );
+
+                    if ( ! class_exists( 'GFFormDisplay' ) ) {
+                        require_once( GFCommon::get_base_path() . '/form_display.php' );
+                    }
+
+                    if ($errorCode == '000') {
+                        $is_confirmation = true;
+                        $note_type = "success";
+                        $note = "Payment COMPLETE: " . $status->getErrorMessage();
+                    } elseif ($errorCode == '-1') {
+                        $is_confirmation = false;
+                        $note_type = "error";
+                        foreach ($form['confirmations'] as $index => $confirmation) {
+                            $form['confirmations'][$index]['message'] = sprintf( esc_html__( 'Payment failed to be captured. Reason: %s', 'gravityforms' ), "Customer left payment page" );
+                        }
+                        $note = $form['confirmations'][$index]['message'];
+                    } else {
+                        $is_confirmation = false;
+                        $note_type = "error";
+                        foreach ($form['confirmations'] as $index => $confirmation) {
+                            $form['confirmations'][$index]['message'] = sprintf( esc_html__( 'Payment failed to be captured. Reason: %s', 'gravityforms' ), $status->getErrorMessage() );
+                        }
+                        $note = $form['confirmations'][$index]['message'];
+                    }
+
+                    $confirmation = GFFormDisplay::handle_confirmation( $form, $lead, false );                    
+
+                    if ( is_array( $confirmation ) && isset( $confirmation['redirect'] ) ) {
+                        header( "Location: {$confirmation['redirect']}" );
+                        exit;
+                    }
+
+                    $instance->add_note( $entry_id, $note, $note_type );
+                    GFFormDisplay::$submission[ $form_id ] = array( 'is_confirmation' => $is_confirmation, 'confirmation_message' => $confirmation, 'form' => $form, 'lead' => $lead );
+
+                } else {
+
+                    return new WP_Error( 'invalid_request', sprintf( __( 'Callback not valid', 'gravityformspayxpert' ) ) );              
+                }                
             }
         }
     }
